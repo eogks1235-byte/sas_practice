@@ -260,3 +260,54 @@ select 'BOTTOM' as 구분 , order_id, total_amount from bot5
 order by 1, 2 desc;
 quit; 
 /*union all 은 컬럼갯수가 맞아야 한다*/
+
+/*1*/
+proc sql outobs=10;
+	select order_id, total_amount,
+(select avg(total_amount) from shop.orders),
+total_amount -(select avg(total_amount) from shop.orders) as 차이
+from shop.orders
+where total_amount > (select avg(total_amount)from shop.orders)
+order by 차이 desc;
+quit;
+
+/*2*/
+proc sql outobs=20;
+	select order_id, user_id, total_amount from shop.orders
+where user_id in (select user_id from shop.users where vip_grade='gold')
+order by total_amount desc;
+quit;
+
+/*3*/
+proc sql;
+	create view work.vip_g as
+select user_id from shop.users where vip_grade='gold';
+	create view work.big as
+select * from shop.orders where total_amount >50000;
+quit;
+proc sql outobs=20;
+	select b.order_id, b.user_id, b.total_amount
+from work.big as b where b.user_id in (select user_id from work.vip_g)
+order by b.total_amount desc;
+quit;
+
+/*4*/
+proc sql outobs=10;
+	select o.order_id, u.vip_grade, o.total_amount
+from shop.orders o inner join shop.users u on o.user_id=u.user_id
+where o.total_amount >
+(select avg(o2.total_amount)from shop.orders o2
+inner join shop.users u2 on o2.user_id = u2.user_id
+where u2.vip_grade =u.vip_grade)
+order by u.vip_grade, o.total_amount desc;
+quit;
+
+/*5*/
+proc sql;
+select u.vip_grade,
+sum(case when o.status='paid' then o.total_amount end) as 정상매출
+from shop.orders o inner join shop.users u 
+on o.user_id = u.user_id
+group by u.vip_grade
+having sum(case when o.status='paid' then o.total_amount end)>100000000
+;quit;
