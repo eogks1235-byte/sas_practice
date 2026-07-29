@@ -311,3 +311,4 @@ on o.user_id = u.user_id
 group by u.vip_grade
 having sum(case when o.status='paid' then o.total_amount end)>100000000
 ;quit;
+/**/
