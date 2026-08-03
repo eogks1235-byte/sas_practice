@@ -333,7 +333,7 @@ by status;
 var order_id total_amount;
 sum total_amount;
 sumby status;
-run;
+run;/*sumby 최종 마미막줄에 합계표시 */
 
 title "[s5.1] where like '김%' -김씨 사용자";
 proc print data=shop.users (obs=10) noobs;
