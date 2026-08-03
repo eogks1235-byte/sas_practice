@@ -349,7 +349,7 @@ proc print data=u_dup; run;
 
 proc sort data=shop.orders_dirty out=u_dup_all noduplicates;
 	by user_id;
-run;
+run;/*sort 할떄 out사용해서 원데이터 손상안되게 만든다 */
 
 /*merge*/
 proc sort data=shop.users_dirty; by user_id;
