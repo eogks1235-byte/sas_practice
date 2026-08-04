@@ -200,7 +200,7 @@ data work.u_coalesce;
 	city= coalesce(city, '미상');
 	email= coalesce(email, 'unknown');
 run;
-
+/*5*/
 data work.u_delete;
 	set shop.users_dirty;
 	if missing(age) then delete;
@@ -217,3 +217,384 @@ union all select 'u_delete', count(*) from work.u_delete
 ;quit;
 title;
 
+/* session 3 이상치 처리(제거) */
+/* IRQ 기준으로 범위 지정 */
+proc means data =shop.users_dirty n min max;
+	var age;
+run;
+
+/* 1) 단순 값 제거*/
+data u_no_outlier;
+	set shop.users_dirty;
+	if age = 999 then delete;
+	if age <0 then delete;
+	if age >120 then delete;
+run;
+proc means data=u_no_outlier n min max;
+	var age;
+run;
+
+/*IRQ 기준으로 범위 지정*/
+proc means data=shop.users_dirty n min max;
+	var age;
+run;
+
+/* IRQ 기준으로 제거*/
+proc univariate data= shop.users_dirty;
+	var age;
+run;
+%let q1=27;
+%let q3=46;
+
+proc sql noprint;
+	select min(age), max(age), pctl(25,age),pctl(75,age)
+	into :age_min, :age_max, :age_q1, :age_q3
+from shop.users_dirty
+where age>00;
+quit;
+%put &age_q1 &age_q3;
+
+%let iqr =%sysevalf(&age_q3-&age_q1);
+%let lo = %sysevalf(&age_q1 -1.5*&iqr);
+%let hi= %sysevalf(&age_q3+1.5*&iqr);
+
+%put &iqr &lo &hi;
+/*where 절과 if 절의 차이 속도*/
+/* 1. proc summary 로 통계량(min, max, q1, q3) 구하기 */
+proc summary data=shop.users_dirty noprint;
+    where age > 0; /* 필요 시 이상치/정상 범위 조건 지정 */
+    var age;
+    output out=work.age_stats
+        min=age_min
+        max=age_max
+        q1=age_q1
+        q3=age_q3;
+run;
+
+/* 2. 계산된 통계량을 매크로 변수에 저장 */
+data _null_;
+    set work.age_stats;
+    call symputx('age_min', age_min);
+    call symputx('age_max', age_max);
+    call symputx('age_q1', age_q1);
+    call symputx('age_q3', age_q3);
+run;
+
+/* 3. IQR 및 상/하안 경계값 계산 */
+%let age_iqr = %sysevalf(&age_q3 - &age_q1);
+%let lower_bound = %sysevalf(&age_q1 - 1.5 * &age_iqr);
+%let upper_bound = %sysevalf(&age_q3 + 1.5 * &age_iqr);
+
+/* 4. 결과 확인 */
+%put =========================================;
+%put [기본 통계량];
+%put 최소값(Min)   : &age_min;
+%put 최대값(Max)   : &age_max;
+%put 1사분위수(Q1) : &age_q1;
+%put 3사분위수(Q3) : &age_q3;
+%put -----------------------------------------;
+%put [IQR 및 이상치 경계값];
+%put 사분위범위(IQR) : &age_iqr;
+%put 하안 경계값(Lower Bound) : &lower_bound;
+%put 상안 경계값(Upper Bound) : &upper_bound;
+%put =========================================;
+
+data work.orders_no_outlier;
+	set shop.orders_dirty;
+	if age > &hi then delete;
+	if age < &lo then delete;
+run;
+
+/* orders_dirty 데이터셋에서 이상치 제거 IRQ 기준 
+	하한과 상한을 검색한 뒤 화면에 출력,
+	orders_dirty에 적용한 뒤 orders_clean 생성*/
+PROC IMPORT DATAFILE="/home/student/shop_csv/orders_dirty.csv"
+	OUT = shop.orders_dirty 	/*shop라이브러리에 users만들기 */
+	DBMS=csv 			/*csv파일 불러오기*/
+	REPLACE;			/*덮어쓰기 가능하도록 하기위해서 */
+	GETNAMES=YES; 		/*첫 행 컬럼이름으로 */
+	GUESSINGROWS=1000;  /*데이터 타입 1000개 행을 보고 타입예측*/
+	DATAROW=2; 			/*첫째행은 컬럼명이라서 2번째부터 시작 */
+RUN;
+
+proc summary data= shop.orders_dirty noprint;
+	where total_amount>0;
+	var total_amount;
+	output out= work.total_amount_stats
+	min= ta_min
+	max=ta_max
+	q1=ta_q1
+	q3=ta_q3
+;run;
+
+data _null_;
+	set work.total_amount_stats;
+	call symputx('ta_min', ta_min);
+	call symputx('ta_max', ta_max);
+	call symputx('ta_q1',ta_q1);
+	call symputx('ta_q3',ta_q3);
+run;
+
+%let ta_iqr =%sysevalf(&ta_q3-&ta_q1);
+%let lo_ta=%sysevalf(&ta_q1-1.5*&ta_iqr);
+%let hi_ta=%sysevalf(&ta_q3+1.5*&ta_iqr);
+
+
+%put =========================================;
+%put [기본 통계량];
+%put 최소값(Min)   : &ta_min;
+%put 최대값(Max)   : &ta_max;
+%put 1사분위수(Q1) : &ta_q1;
+%put 3사분위수(Q3) : &ta_q3;
+%put -----------------------------------------;
+%put [IQR 및 이상치 경계값];
+%put 사분위범위(IQR) : &ta_iqr;
+%put 하안 경계값(Lower Bound) : &lo_ta;
+%put 상안 경계값(Upper Bound) : &hi_ta;
+%put =========================================;
+
+/*orders_dirty 데이터셋에서 이상치 제거 IRQ 기준 하안과 상한을
+검색한뒤 화면에 출력 ,orders_dirty에 적용한뒤 orders_clean 생성
+total_amount*/
+proc means data=shop.orders_dirty;
+	where total_amount>0;
+	var total_amount;
+	output out =orders_status
+	min=t_min
+	max=t_max
+p25=t_q1
+p75=t_q3;
+
+run;
+
+proc sql;
+	select t_q1, t_q3 into :t_q1, :t_q3 from orders_status;
+quit;
+
+%put IQR: &iqr, lo_t: &lo, hi_t:&hi;
+
+%let iqr = %sysevalf(&t_q3 -&t_q1);
+%let lo = %sysevalf(&t_q1-1.5*&iqr);
+%let hi = %sysevalf(&t_q3+1.5*&iqr);
+
+data orders_clean;
+    set shop.orders_dirty;
+    
+proc means data=shop.orders_dirty n mean std min max q1 q3 maxdec=2;
+    where total_amount > 0; /* 필요한 경우 조건 지정 */
+    var total_amount;
+    title "total_amount 기본 통계량 분석 (Q1, Q3 포함)";
+run;
+
+/* 1. 1%와 99% 백분위수 계싼 후 테이블로 저장*/
+proc means data=shop.users_dirty;
+	where age>0 and age <99;
+	var age;
+	output out=work.age_pctl p1=age_p1 p99=age_p99;
+run;
+
+/*2. 매크로 변수에 저장*/
+proc sql noprint;
+	select age_p1, age_p99
+	into :age_p1, :age_p99
+	from work.age_pctl;
+quit;
+
+data users_clean;
+	set shop.users_dirty;
+	if age< &age_p1 then age = &age_p1;
+	if age> &age_p99 then age = &age_p99;
+if age =999 then age=&age_p99;
+
+run;
+
+proc means data=users_clean n mean min max nmiss;
+	var age;
+run;
+
+/*비대칭 분포 정규화*/
+data work.orders_log;
+	set shop.orders_dirty;
+	where total_amount>0;
+	amt_log=log(max(0,total_amount)+1); /*max는 마이너스대비해서 해놓음*/
+run;
+
+proc univariate data =work.orders_log normal noprint;
+	var total_amount amt_log;
+	histogram total_amount amt_log /normal;
+	title '[s3.5]log변환 -정규성개선';
+run;
+
+data work.ordeers_back;
+	set work.orders_log;
+	amt_log =exp(amt_log)-1;
+run;
+
+proc univariate data= work.ordeers_back normal noprint;
+	var total_amount amt_log;
+	title'[s3.55]log변환 -원데이터로';	
+histogram total_amount amt_log /normal;
+run;
+
+/*session 4 문자 변환함수*/
+data work.users_scan;
+	set shop.users;
+	
+length email_id $30 email_dom $30
+	city_main $10 city_dist $20;
+
+email_id= scan(email,1,'@');
+email_dom=scan(email,2,'@');
+
+email_co=scan(email_dom,1,'.');
+
+city_main=scan(city,1,' ');
+city_dist=scan(city,2,'');
+
+run; 
+
+proc freq data=work.users_scan order=freq;
+	table email_dom /nocum;
+run;
+
+proc freq data=work.users_scan order=freq;
+	table city_main /nocum;
+run;
+
+proc sql outobs=5;
+select email
+from shop.users;
+run;
+
+proc sql outobs=5;
+select email_id
+from work.users_scan;
+run;
+
+proc freq data=shop.users_dirty ;
+	table channel email /nocum;
+run;
+
+data users_clean;
+    set shop.users_dirty;
+	channel = upcase(strip(channel));
+    email   = upcase(strip(tranwrd(email, "_at_", "@")));
+    city    = upcase(strip(city));
+
+	email_dom = scan(eamil,2,'@');
+	city_main = scan(city, 1, ' ');
+run;
+
+proc freq data=users_clean nlevels;
+	table channel email_dom city_main/nocum;
+
+    title "STEP 5 - 정제 후 주요 변수 유형 수 및 빈도 비교";
+run;
+
+
+/*session 5 날짜 변환*/
+data work.users_date;
+	set shop.users;
+	length _s_str $25;
+/*문자를 date로*/
+_s_str = strip(vvalue(signup_date));
+	signup_d =input(_s_str,anydtdte25.);
+	format signup_d yymmdd10.;
+/*datetime*/
+signup_dt= input(_s_str,anydtdtm25.);
+format signup_dt datetime16.;
+/*date9*/
+d1=input('01JAN2025',date9.);
+/*yymmdd*/
+d2=input('2025-01-01',yymmdd10.);
+
+format d1 date9. d2 yymmdd10.;
+drop _s_str;
+run;
+
+proc print data=users_date(obs=10);
+	var signup_date signup_d signup_dt d1 d2;
+run;
+
+/*put - 날짜(num) >> 문자*/
+data work.users_put;
+	set users_date;
+month_key =put(signup_d, yymmd6.);
+
+signup_kr =put(signup_d,yymmdd10.);
+
+wkday=put(signup_d,downame.);
+
+mon_name=put(signup_d,monname.);
+run;
+
+proc freq data=work.users_put;
+table month_key/nocum;
+run;
+
+/*datepart timepart dhms*/
+/* [SESSION 5-2] DATEPART, TIMEPART, 날짜 요소 추출, DHMS 활용 */
+data work.users_d;
+    set shop.users;
+    
+    /* 0) 먼저 문자열을 SAS Datetime 숫자값으로 변환해둡니다 */
+    _s_str    = strip(vvalue(signup_date));
+    signup_dt = input(_s_str, anydtdtm25.); 
+    
+    /* 1) DATETIME → DATE (DATEPART에는 Datetime 숫자값을 전달) */
+    signup_d = datepart(signup_dt);
+    
+    /* 2) DATETIME → TIME (TIMEPART에는 Datetime 숫자값을 전달) */
+    signup_t = timepart(signup_dt);
+    
+    /* 3) 연·월·일·요일·분기 추출 (Date 숫자값에서 추출) */
+    signup_year  = year(signup_d);
+    signup_month = month(signup_d);
+    signup_day   = day(signup_d);
+    signup_wkday = weekday(signup_d); /* 1:일, 2:월, ..., 7:토 */
+    signup_qtr   = qtr(signup_d);
+    
+    /* 4) DATE → DATETIME (DHMS 함수 활용) */
+    d_only = input("2025-01-01", yymmdd10.);
+    dt_new = dhms(d_only, 10, 30, 0); /* 2025-01-01 10:30:00 생성 */
+
+    /* 포맷 지정 */
+    format signup_dt datetime16. signup_d yymmdd10. signup_t time8. d_only yymmdd10. dt_new datetime16.;
+    
+    drop _s_str;
+run;
+
+/* 결과 출력 확인 */
+proc print data=work.users_d (obs=10);
+    var signup_d signup_t signup_year signup_month signup_day signup_wkday signup_qtr d_only dt_new;
+    title "=== Session 5 날짜/시간 함수 변환 결과 (Top 10) ===";
+run;
+
+proc print data=shop.users (obs=5);
+    var signup_date;
+run;
+
+DATA work.users_arith;
+SET work.users_d;
+/* 1) 3개월후*/
+sub_end = INTNX("month", signup_d, 3);
+FORMAT sub_end YYMMDD10.;
+/* 2) 1년후같은날*/
+anniv = INTNX("year", signup_d, 1, "same");
+FORMAT anniv YYMMDD10.;
+/* 3) 오늘-가입일= 가입후일수*/
+days_since = TODAY() -signup_d;
+/* 또는*/
+days_v2 = INTCK("day", signup_d, TODAY());
+/* 4) 가입후개월수*/
+months_since = INTCK("month",
+signup_d, TODAY());
+/* 5) 가입연도*/
+IF YEAR(signup_d) >= 2025 THEN new_user = 1;
+ELSE				new_user = 0;
+RUN;
+
+
+proc print data= users_arith(obs=10);
+	var signup_d sub_end anniv days_since months_since new_user
+;run;
