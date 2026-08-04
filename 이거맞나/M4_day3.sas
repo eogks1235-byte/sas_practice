@@ -598,3 +598,123 @@ RUN;
 proc print data= users_arith(obs=10);
 	var signup_d sub_end anniv days_since months_since new_user
 ;run;
+data users_date_prep;
+    set shop.users_dirty; /* 실제 날짜 값이 채워져 있는 테이블명으로 지정 */
+
+    /* 1. 데이터 타입 및 값에 따른 signup_d(Date) 변환 */
+    if vtype(signup_at) = 'C' then do;
+        /* 문자형일 경우: Datetime 변환 후 Date 추출 */
+        signup_dt = input(strip(vvalue(signup_at)), anydtdtm25.);
+        signup_d  = datepart(signup_dt);
+    end;
+    else do;
+        /* 숫자형일 경우: 값의 크기로 Datetime인지 Date인지 판별 */
+        if signup_at > 100000000 then signup_d = datepart(signup_at); /* Datetime 숫자 */
+        else signup_d = signup_at;                                   /* Date 숫자 */
+    end;
+
+    format signup_d yymmdd10.;
+
+    /* [STEP 1~4] 과제 요구사항 수행 */
+    signup_year  = year(signup_d);
+    signup_month = month(signup_d);
+    signup_day   = day(signup_d);
+    signup_wkday = weekday(signup_d);
+
+    signup_3m    = intnx('month', signup_d, 3);
+    format signup_3m yymmdd10.;
+
+    days_since_signup = intck('day', signup_d, today());
+
+    drop signup_dt;
+run;
+
+/* [STEP 5] PROC FREQ */
+proc freq data=users_date_prep;
+    tables signup_year signup_month / nocum;
+    title "STEP 5 - 가입 연도 및 월별 빈도 분석";
+run;
+
+/* 결과 출력 */
+proc print data=users_date_prep (obs=10);
+    var signup_at signup_d signup_year signup_month signup_day signup_wkday signup_3m days_since_signup;
+    title "=== 결과 확인 ===";
+run;
+proc print data=shop.users (obs=5);
+    var signup_at;
+run;
+
+
+
+
+/*숙제?*/
+/*실습 1*/
+dATA work.users_imputed;
+SET shop.users;
+vip_grade   = coalescec(vip_grade, 'none');
+total_spent = coalesce(total_spent, 0);    
+IF missing(email) THEN email = 'unknown';  
+RUN;
+/* 보정 전/후 결측 비교 */
+PROC MEANS DATA = shop.users NMISS;
+VAR total_spent;
+RUN;
+PROC MEANS DATA = work.users_imputed NMISS;
+VAR total_spent;
+RUN;
+
+/*실습2*/
+pROC UNIVARIATE DATA = shop.orders NOPRINT;
+VAR total_amount;
+OUTPUT OUT = work.qstat q1=q1 q3=q3;   
+RUN;
+DATA work.orders_capped;
+IF _N_ = 1 THEN SET work.qstat;
+SET shop.orders;
+iqr   = q3 - q1;
+lower = q1 - 1.5 * iqr;
+upper = q3 + 1.5 * iqr;
+IF total_amount < lower THEN total_amount = lower; 
+ELSE IF total_amount > upper THEN total_amount = upper;  /* upper */
+RUN;
+
+/*실습 3*/
+dATA work.users_clean;
+SET shop.users;
+name_clean  = compress(name, ' ');           
+email_clean = lowcase(STRIP(email));         
+email_clean = tranwrd(email_clean,'gmail.co.kr', 'gmail.com');
+city_clean  = TRANWRD(city, '서울특별시', '서울'); 
+RUN;
+PROC FREQ DATA = work.users_clean;
+TABLES city_clean / NOCUM;
+RUN;
+
+/*실습4*/
+DATA work.users_date;
+SET shop.users;
+가입년 = year(signup_date);              
+가입월 = month(signup_date);              
+가입주 = WEEK(signup_date);
+경과월 = intck('MONTH', signup_date, TODAY());
+다음달 =intnx('MONTH', signup_date, 1);          
+FORMAT 다음달 YYMMDD10.;
+RUN;
+PROC FREQ DATA = work.users_date;
+TABLES 가입년 / NOCUM;
+RUN;
+
+/*실습5*/
+pROC format;                                
+VALUE $vip_fmt
+'vip'      
+= '최우수'
+'platinum' = '플래티넘'                  
+'gold'     = '골드'
+'silver'   = '실버'
+'bronze'   = '브론즈';
+RUN;
+PROC PRINT DATA = shop.users (OBS=20) NOOBS;
+FORMAT vip_grade $vip_fmt.;                 
+VAR user_id name vip_grade total_spent;
+RUN;
