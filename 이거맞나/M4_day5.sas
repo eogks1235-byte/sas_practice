@@ -105,13 +105,13 @@ quit;
 title;
 %mend;
 
-option mprint mlogic symbolgen; /*디버깅시작*/
+options mprint mlogic symbolgen; /*디버깅시작*/
 %ch_age_kpi(); /*기본값*/
 %ch_age_kpi(ch=social);
 %ch_age_kpi(ch=social, lo=30, hi=70, top=20);
 
 
-option nomprint nomlogic nosymbolgen; /*디버깅종료*/
+options nomprint nomlogic nosymbolgen; /*디버깅종료*/
 
 /* vip 등급별 매크로 - kpi집계 >> vip_kpi(grade=)
 	grade, 건수, 평균주문액(total_spent), 평균주문건수(order_count)
@@ -231,12 +231,69 @@ proc sql;
 	from shop.users;
 quit;
 %put channels : &channels;
-d
-../
 
+/*session 4 into 변수 */
+/* proc sql noprint; */
+/* 	select count(*) into: n_users	from shop.users; */
+/* 	select max(total_amount) into:max_amt from shop.orders */
+/* 	where status='paid'; */
+/* 	select put(avg(total_amount), comma10.) into: avg_amg */
+/* 	from shop. */
+/* ; */
+proc sql;
+	select count(distinct vip_grade) 
+	from shop.users;
+quit;
 
+proc sql noprint;
+	select vip_grade, count(*) format=comma10.
+	into :vip1-:vip5, :cnt1-:cnt5
+	from shop.users
+	where vip_grade is not null
+	group by vip_grade;
+quit;
 
+%put vip1=&vip1 cnt1=&cnt1;
+%put vip2=&vip2 cnt2=&cnt2;
+%put vip3=&vip3 cnt3=&cnt3;
 
+/* 완전 자동화 매크로 작성 - 채널 자동 반복*/
+/* 1. channel 을 검색해서 변수(리스트) 저장*/
+proc sql noprint;
+	select distinct channel into :ch_list separated by ' '
+	from shop.users;
+quit;
+
+%put ch_list ->&ch_list;, ch_list 갯수 ->%sysfunc(countw(&ch_list)) ;
+%macro auto_all_channels;
+	%local n_ch i ch;
+	%let n_ch =%sysfunc(countw(&ch_list));
+/*word 갯수세기 countw*/
+
+/*자동 계싼된 n_ch 수만큼 반복 루프 생성*/
+%do i=1 %to &n_ch;
+	%let ch=%scan(&ch_list,&i);
+	%put [동적 [&i /&n_ch]] &ch;
+	%ch_kpi(ch=&ch);
+%end;
+%mend;
+
+%auto_all_channels;
+
+/*vip list [산출물] &vip_list + 동적 분석 결과*/
+proc sql noprint;
+	select user_id into :vip_list separeted by ' '
+from shop.users
+	where vip_grade ='gold';
+quit;
+%put &vip_list;
+%put vip 수:&sqlobs;
+
+title'[미니실습4] vip 고객 주문 내역 (동적 in절)';
+proc sql outobs=10;
+	where user_id in(&vip_list);
+quit;
+title;
 
 
 
