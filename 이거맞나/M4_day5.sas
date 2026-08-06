@@ -232,7 +232,7 @@ proc sql;
 quit;
 %put channels : &channels;
 d
-
+../
 
 
 
