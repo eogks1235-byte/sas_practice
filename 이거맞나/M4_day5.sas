@@ -395,5 +395,92 @@ QUIT;
 /* 매크로 실행 */
 %grade_excel;
 
+실습3
+device 주문건수 주문총액 paid
+실습4
+채널별 
+work email_user gold_user 
+채널별 고객리스트를 작성 다타셋만들기 1000명 
 
+/*1*/
+%let yyyymm=202601;
+%let cutoff=100000;
+%let root=/home/student/report;
 
+/* PDF 출력 시작 */
+ods pdf file="&root/&yyyymm._매출.pdf";
+
+/* DATA= 지정 및 WHERE 조건 연결 */
+proc print data=shop.orders noobs;
+	where put(order_date, yymmn6.) = "&yyyymm"
+	  and total_amount >= &cutoff;
+run;
+
+/* PDF 출력 종료 */
+ods pdf close;
+%let csv_dir=/home/student/shop_csv;
+
+%macro import_csv(name=);
+	proc import datafile="&csv_dir/&name..csv"
+	out=shop.&name dbms=csv replace;
+	getnames=yes; GUESSINGROWS=max;
+run;
+%mend;
+%import_csv(name=categories);
+%import_csv(name=events);
+%import_csv(name=coupons);
+%import_csv(name=campaigns);
+
+%LET report_dir = /home/student/report;
+
+%MACRO yearly_pdf(year=);
+	%LOCAL m m2 ym;
+
+	%DO m = 1 %TO 12;
+		%LET m2 = %SYSFUNC(PUTN(&m, z2.));
+		%LET ym = &year.&m2;
+
+		ODS PDF FILE="&report_dir/&ym._매출.pdf" STYLE=Festival;
+
+		TITLE "&ym 월 정상거래 내역 (상위 100건)";
+		
+		PROC PRINT DATA=shop.orders(OBS=100);
+			/* 숫자형 날짜 컬럼에 맞게 PUT 함수 사용 */
+			WHERE PUT(order_date, yymmn6.) = "&ym"
+			  AND status = 'paid';
+			
+			/* ※ 주의: '실제금액컬럼명'을 실제 변수명으로 변경하세요 */
+			VAR order_id order_date device status total_amount;
+			FORMAT total_amount COMMA15.;
+		RUN;
+
+		ODS PDF CLOSE;
+	%END;
+%MEND yearly_pdf;
+
+%yearly_pdf(year=2024);
+
+%LET report_dir = /home/student/report;
+
+%MACRO channel_pdf();
+	ODS PDF FILE="&report_dir/채널별_고객리스트.pdf" STYLE=Festival;
+
+	TITLE "채널별 정상거래 고객 리스트";
+	
+	/* channel 기준으로 정렬 후 그룹 출력 */
+	PROC SORT DATA=shop.orders OUT=sorted_orders;
+		BY channel order_date;
+		WHERE status = 'paid'; /* 정상거래 조건 */
+	RUN;
+
+	PROC PRINT DATA=sorted_orders;
+		BY channel; /* 채널별로 섹션을 나누어 출력 */
+		PAGEBY channel; /* 채널이 바뀔 때마다 새 페이지로 구분 */
+		VAR order_id order_date device status total_amount;
+		FORMAT total_amount COMMA15.;
+	RUN;
+
+	ODS PDF CLOSE;
+%MEND channel_pdf;
+
+%channel_pdf();
