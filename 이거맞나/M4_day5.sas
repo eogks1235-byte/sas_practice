@@ -232,14 +232,29 @@ proc sql;
 quit;
 %put channels : &channels;
 
-/*session 4 into 변수 */
-/* proc sql noprint; */
-/* 	select count(*) into: n_users	from shop.users; */
-/* 	select max(total_amount) into:max_amt from shop.orders */
-/* 	where status='paid'; */
-/* 	select put(avg(total_amount), comma10.) into: avg_amg */
-/* 	from shop. */
-/* ; */
+/* session 4 INTO 변수 */
+/* ── S4.1  INTO :변수 — 단일 값 저장 ─────────────── */
+PROC SQL NOPRINT;
+   SELECT COUNT(*)         INTO :n_users     FROM shop.users;
+   SELECT MAX(total_amount) INTO :max_amt     FROM shop.orders WHERE status='paid';
+   SELECT PUT(AVG(total_amount), COMMA10.) INTO :avg_amt
+      FROM shop.orders WHERE status='paid';
+QUIT;
+
+%PUT n_users = &n_users;
+%PUT max_amt = &max_amt;
+%PUT avg_amt = &avg_amt;
+
+/* ── S4.2  INTO :변수 SEPARATED BY — 여러 값 ───── */
+PROC SQL NOPRINT;
+   SELECT DISTINCT channel
+   INTO :ch_list SEPARATED BY ' '
+   FROM shop.users;
+
+   SELECT COUNT(DISTINCT channel) INTO :n_ch
+   FROM shop.users;
+QUIT;
+
 proc sql;
 	select count(distinct vip_grade) 
 	from shop.users;
@@ -295,6 +310,90 @@ proc sql outobs=10;
 quit;
 title;
 
+/* ── S4.4-확장  VIP 등급 동적 추출 + 자동 반복 (Session 6 daily_full_report 에서 재사용) ── */
+/* ====================================================
+   VIP 등급 동적 추출 + 자동 반복 KPI 집계
+   결과 테이블: shop.kpi_channel_v6
+==================================================== */
+/* 1. VIP 등급 동적 추출 */
+PROC SQL NOPRINT;
+   SELECT DISTINCT vip_grade
+   INTO :vip_grades SEPARATED BY ' '
+   FROM shop.users
+   WHERE vip_grade IS NOT NULL;
+QUIT;
+
+/* 2. 등급 1개에 대한 KPI 계산 + 저장 매크로 */
+%MACRO vip_kpi(grade=, first=);
+   PROC SQL;
+      CREATE TABLE work._tmp_vip_kpi AS
+      SELECT "&grade" AS vip_grade LENGTH=20,
+             COUNT(*)                   AS order_cnt,
+             COUNT(DISTINCT o.user_id)  AS user_cnt,
+             SUM(o.total_amount)        AS total_amt,
+             AVG(o.total_amount)        AS avg_amt
+      FROM shop.orders AS o
+      INNER JOIN shop.users AS u
+         ON o.user_id = u.user_id
+      WHERE u.vip_grade = "&grade";
+   QUIT;
+
+   %IF &first = Y %THEN %DO;
+      PROC SQL;
+         CREATE TABLE shop.kpi_channel_v6 AS
+         SELECT * FROM work._tmp_vip_kpi;
+      QUIT;
+   %END;
+   %ELSE %DO;
+      PROC APPEND BASE=shop.kpi_channel_v6
+                  DATA=work._tmp_vip_kpi FORCE;
+      RUN;
+   %END;
+
+%MEND vip_kpi;
+
+/* 3. 전체 등급 자동 반복 매크로 */
+%MACRO auto_all_vip;
+   %LOCAL i g n_ch flag;
+   %LET n_ch = %SYSFUNC(COUNTW(&vip_grades));
+
+   %DO i = 1 %TO &n_ch;
+      %LET g = %SCAN(&vip_grades, &i);
+      %IF &i = 1 %THEN %LET flag = Y;
+      %ELSE %LET flag = N;
+      %vip_kpi(grade=&g, first=&flag);
+   %END;
+
+   %PUT NOTE: 총 &n_ch 개 VIP 등급 KPI가 shop.kpi_channel_v6 에 누적되었습니다.;
+%MEND auto_all_vip;
+
+%auto_all_vip;
+
+%MACRO grade_excel;
+    /* ODS EXCEL 시작 */
+    ODS EXCEL FILE="/home/student/sas_practice/report/등급별.xlsx";
+
+    %DO i = 1 %TO 5;
+        %LET g = %SCAN(vip platinum gold silver bronze, &i);
+
+        /* 시트명 동적 변경, 자동 필터, 헤더 고정(틀고정) 옵션 적용 */
+        ODS EXCEL OPTIONS(
+            SHEET_NAME="&g"
+            AUTOFILTER="ALL"
+            FROZEN_HEADERS="ON"
+        );
+
+        PROC PRINT DATA=shop.users NOOBS;
+            WHERE vip_grade="&g";
+        RUN;
+    %END;
+
+    /* ODS EXCEL 종료 */
+    ODS EXCEL CLOSE;
+%MEND grade_excel;
+
+/* 매크로 실행 */
+%grade_excel;
 
 
 
