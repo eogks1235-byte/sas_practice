@@ -178,6 +178,128 @@ vbox total_spent /category=vip_grade;
 run;
 
 
+/*proc univariate 풀세트 */
+title'[slide 30]proc univariate - 정규성 + 시각화';
+proc univariate data=shop_db.users normal
+	cibasic plots;
+var age;
+	histogram age /normal;
+	qqplot age / normal(mu=est sigma=est);
+run;
+title;
+
+/*q1, q3 계싼*/
+proc means data=shop_db.orders
+	noprint q1 q3;
+	var total_amount;
+	output out=work.qstat
+	q1=q1 q3=q3;
+run;
+
+proc sql noprint;
+	select q1,q3 into :q1, :q3
+from work.qstat;
+quit;
+
+/*매크로 변수 지정*/
+data _null_;
+	set work.qstat;
+	iqr =q3-q1;
+	call symputx('lower',q1-1.5*iqr); /*sysputx 최신함수? 문자 숫자다가능*/
+	call symputx('upper',q3+1.5*iqr);
+run;
+
+%put note: IQR 하한=&lower/ 상한=&upper q1:&q1/ q3:&q3 ;
+/*이상치 추출*/
+data work.outliers;
+	set shop_db.orders;
+	if total_amount <&lower
+	or total_amount >&upper
+	then output;
+run; /*output은 outliers에 들어간다 */
+
+proc sql ;
+	select count(*) as n_outliers from work.outliers;
+quit;
+
+/*box plot*/
+proc sgplot data=shop_db.orders;
+	vbox total_amount / category=channel;
+run;
+
+/*실습3*/
+proc univariate data=shop_db.users normal;
+	var total_spent;
+	histogram total_spent /normal;
+	qqplot total_spent /normal (mu=est sigma=est);
+run; 
+
+/*session 4 :t-test*/
+PROC TTEST DATA=shop_db.users
+H0=35 /*귀무가설 */
+ALPHA=0.05;
+VAR age;
+RUN;
+
+/*proc ttest -1 -sample*/
+proc ttest data=shop_db.orders
+	h0=50000 alpha=0.05;
+	var total_amount;
+	where status='paid';
+run;/*평균매출이 5만원이 아니다*/
+
+PROC UNIVARIATE DATA=shop_db.orders
+MU0=50000;
+VAR total_amount;
+RUN;
+
+title '[slide 45] proc ttest - 1-sample 풀세트, paid';
+/*모수 t-test*/
+PROC TTEST DATA=shop_db.orders
+H0=680000 ALPHA=0.05;
+WHERE status='paid';
+VAR total_amount;
+RUN;
+title;
+
+title'[slide 47]미니실습 5-products.price가설검정';
+/*실습 5 신제품가격 t-test*/
+proc ttest data=shop_db.products
+h0=50000 alpha=0.05;
+var price;
+run;/*50000원으로 팔수없다 평균 11.5~13.9만원이다 */
+
+/*정규성위배시 비모수대안*/
+/*중위수 확인 */
+proc univariate data=shop_db.products normal;
+var price;
+run;
+
+proc univariate data=shop_db.products mu0=50000;
+	var price;
+run;
+title;
+
+/* 실습 6 - 숙제 */
+%LET TODAY = %SYSFUNC(TODAY(), YYMMDDN8.);
+ODS PDF FILE="...&TODAY..pdf"
+STYLE=journal;
+TITLE "평균 주문금액 검정 -APA";
+PROC TTEST DATA=shop_db.orders
+H0=50000;
+VAR total_amount;
+WHERE status='paid';
+RUN;
+PROC SQL;
+SELECT (MEAN(total_amount) -total_amount)/STD(total_amount)
+AS d FORMAT=8.3
+FROM shop.orders
+WHERE status='paid';
+QUIT;
+ODS PDF close;
+
+
+
 
 
 
