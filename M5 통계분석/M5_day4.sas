@@ -151,7 +151,7 @@ Intercept	1	274023264	102223732	2.68	0.0100
 budget		1	-0.28102	1.85759		-0.15	0.8804
 */
 
-proc contents daata=ads;
+proc contents data=ads;
 run;
 proc reg data=work.ads	
 plots=(fit residuals);
@@ -170,94 +170,142 @@ clicks		1	4577.17672	658.91751	6.95	<.0001
 */
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/* session4 : 다중회귀분석 */
+title'[s4.2-@] step2 - 다중 회귀 진단';
+proc reg data=work.uo_sum
+	plots=none;
+	model spent=age n_orders avg_price
+/ r clb stb vif tol dw;
+output out=work.diag
+	predicted=yhat
+	residual=resid;
+run;quit;
+title;
+/*dw = durbin-watson -잔차독립성*/
+/*
+Standardized
+Estimate*/
+
+
+/* 2단계 : 잔차 정규성 : i=univariate normal*/
+title'[s4.2-@] 잔차 정규성 - proc nuivariate qqplot';
+proc univariate data=work.diag normal;
+	var resid;
+	qqplot resid / normal (mu=est sigma=est);
+run;
+title;
+
+/* 잔차 vs 예측 - 등분산 >> 패턴확인 */
+proc sgplot data=diag;
+	scatter x=yhat y=resid;
+refine 0 / axis=y;
+run;
+
+
+/*변수 선택 >> stepwise + VIF */
+proc reg data=ads
+	plots=(fit residuals);
+	model revenue = budget cpc impressions clicks conversions season /
+		selection =stepwise /*다중공선성에서 안전한것이 확보된 애들을 찾아줌*/
+	slentry =0.15/*진입*/
+	slstay=0.15/*제거*/
+vif stb;
+run;
+
+
+/*session 5: logistic 회귀분석 >> sigmoid, logictic*/
+title'[s5.1]proc rogistic 풀세트 (clodds / ctable / rsq / roc)';
+proc logistic data=work.uo_sum
+	plots(only)=roc;
+/*의미: 기본으로 출력되는 수많은 그래프(잔차, 영향력 진단 플롯 등)를 모두 끄고,
+ 오직 ROC 커브 하나만 출력하라는 뜻입니다.*/
+	class gender (ref='F');
+	model is_vip(event='1') = age gender spent
+/*내가 예측하려는 사건(VIP=1)이 바로 이 값이다!"라고 확실하게 타깃을 지정*/
+/ clodds = wald	
+/*오즈비(Odds Ratio)의 $95\%$
+ 신뢰구간(Confidence Limit)을 구할 때 Wald 검정 통계량 */
+ctable rsq stb;
+/*ctable =confusion matrix
+rsq = r square*/
+run;
+title;
+
+
+/*고객 이탈률 */
+proc logistic data=shop_db.users descending;
+	class gender (param=ref ref ='M');
+/* ref ='M' 더미변수 
+ref='M'의 역할: '남성(M)'을 기준점($0$)으로 삼겠다
+범주형변수를 알아보기위해서*/
+	model churn = age total_spent gender order_count
+		/clparm=wald;
+	output out=work.score
+		predicted = p_churn;
+run;
+
+
+/*실제 스키마 반영 -work.uo_sum 사용(tenure_days , marketing_convesion,
+ order_count 실컴럼활용 */
+title'[s5.2] 실습 5 - 고객 이탈 예측 로지스틱(work.uo_sum)';
+proc logistic data=work.uo_sum descending;
+	class gender (param=ref ref='M')
+		marketing_consent (param=ref ref='0');
+	model churn = age total_spent order_count tenure_days 
+	gender marketing_consent
+/	clparm = wald ctable rsq stb;
+	output out=work.score
+	predicted = p_churn;
+run;
+title;
+
+proc print data=score(obs=10);
+	var churn p_churn;
+run;
+
+
+/*session 6: 이상치를 처리하는 방법: robusreg */
+title'[s6.1-1]robust 회귀 -M-estimation';
+
+proc robustreg data = work.uo_sum
+	method=M
+plots=(ddplot rdplot);
+
+	model spent= age n_orders;
+	output out=work.robust
+	r=resid_r
+	outlier=outlier
+	leverage=leverage;
+run;
+
+title'[s6.1_2]OLS -robust 비교용';
+proc reg data=work.uo_sum;
+	model spent =age n_orders;
+	run; quit;
+title;
+
+proc corr data=shop_db.products
+	pearson spearman;
+var price launch_date;
+run;
+
+proc reg data =shop_db.products;
+
+	model price= cost;
+run;quit;
+
+proc reg data=shop_db.products;
+	model price = rating_avg review_count cost/
+vif stb;
+	plot regidual.*predicted.;
+run; quit;
+
+proc logistic data = shop_db.users descending;
+class gender (ref='M');
+	model churn = age last_login_date gender/
+	clparm= wald;
+output out = work.score predicted =p_churn;
+run;
 
 
 
