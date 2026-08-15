@@ -208,7 +208,7 @@ from shop.users
 	where last_login_date is not null
 order by 연도, 달, 일 desc;
 quit;
-
+/*intnx > B는 해당달의 초일 e는 다음달의 말일 */
 /* 월별 주문수, 매출 총액을 영구 저장 -> monthly_kpi 테이블명 */
 proc sql;
 	create table shop.monthly_kpi
@@ -271,7 +271,7 @@ proc sql;
 	group by channel, calculated 년월
 	;
 quit;
-
+/*shop 라이브러리에 영구저장 work와 다름*/
 proc sql outobs=10;
 	select * from shop.vw_channel_monthly_1
 ;
