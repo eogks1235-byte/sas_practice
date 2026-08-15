@@ -93,6 +93,7 @@ quit;
 proc sql outobs=20;
 	select
 		upcase(payment_method) as 결제수단,
+	payment_method,
 		round(total_amount, 100) as 금액반올림 format=comma12.,
 		substr(channel, 1, 3) as 채널약어,
 		total_amount as 금액 format=comma12.
@@ -230,6 +231,7 @@ proc sql outobs=20;
 	
 	from shop.users;
 quit;
+
 
 /* 10대, 20대, 30대, 40대, 50대, 아니면 시니어*/ 
 proc sql outobs=20;
