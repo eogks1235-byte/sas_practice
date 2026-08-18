@@ -188,108 +188,121 @@ run;
 proc print data=stats;
 run;
 
+/*
+1. 데이터셋로드
+2. 데이터구조확인
+3. 통계정보확인
+4. vip회원식별 macro=기준 만들기
+	total_spent 200000이상 order_count 10이상*/
+
+/*let은 하드코딩  비교연산사불가*/
+%let vip_spent = 200000;
+%let vip_count = 10;
+
+proc python;
+submit;
+import pandas as pd
+
+vip_spent = float(SAS.symget('vip_spent'))
+vip_count = int(SAS.symget('vip_count'))
+
+df = pd.read_csv('/home/student/shop_csv/users.csv')
+
+# --- 디버그: 실제 컬럼명과 데이터 형태부터 확인 ---
+print('컬럼목록:', df.columns.tolist())
+print('행수:', len(df))
+print(df.dtypes)
+
+if 'order_count' not in df.columns:
+    print('경고: order_count 컬럼이 없어서 전부 0으로 대체됨 -> VIP 조건이 항상 거짓이 될 수 있음')
+    df['order_count'] = 0
+
+# total_spent가 문자열로 읽혔을 가능성 대비 - 숫자 강제 변환
+df['total_spent'] = pd.to_numeric(df['total_spent'], errors='coerce')
+df['order_count'] = pd.to_numeric(df['order_count'], errors='coerce')
+
+vip = df[(df['total_spent'] >= vip_spent) & (df['order_count'] >= vip_count)]
+
+print(f'전체 회원수: {len(df)}')
+print(f'VIP 회원수: {len(vip)} / 비율: {len(vip)/len(df) if len(df)>0 else 0:.4f}')
+
+SAS.symput('vip_n', str(len(vip)))
+SAS.symput('vip_rate', str(len(vip)/len(df)) if len(df)>0 else '0')
+endsubmit;
+run;
+
+%put NOTE: vip회원수 = &vip_n;
+%put NOTE: vip비율 = &vip_rate;
+
+PROC PYTHON;
+SUBMIT;
+import pandas as pd
+df = pd.read_csv('/home/student/shop_csv/users.csv')
+# [1] 데이터 크기
+print(f'행 수: {df.shape[0]:,} / 컬럼 수: {df.shape[1]}')
+# [2] 결측치 확인
+print('결측치 비율:')
+print(df.isnull().mean().sort_values(ascending=False).head())
+# [3] 수치 변수 요약
+print(df[['age', 'total_spent', 'order_count', 'recency']].describe())
+# [4] 범주 변수 분포
+print('채널별 분포:')
+print(df.channel.value_counts(normalize=True).round(3))
+# [5] 이탈률 (타겟 변수)
+print(f'이탈률: {df.churn.mean():.2%}')
+# [6] 이상치 진단- IQR
+Q1, Q3 = df.total_spent.quantile([0.25, 0.75])
+upper = Q3 + 1.5 * (Q3 - Q1)
+outliers = df[df.total_spent > upper]
+print(f'이상치: {len(outliers):,} ({len(outliers)/len(df):.1%})')
+
+ENDSUBMIT;
+QUIT;
+
+
+/*AI활용 프롬프트*/
+proc python;
+submit;
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, roc_auc_score
+
+# 1. 데이터 로드
+file_path = '/home/student/shop_csv/users.csv'
+df = pd.read_csv(file_path)
+
+# 2. 독립변수(X) 및 종속변수(y) 설정
+features = ['age', 'total_spent', 'order_count', 'recency']
+target = 'churn'
+
+X = df[features]
+y = df[target]
+
+# 3. 데이터 분할 (Train 7: Test 3, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.3, random_state=42, stratify=y
+)
+
+# 4. 이진분류 모델 생성 및 학습 (Random Forest)
+model = RandomForestClassifier(random_state=42)
+model.fit(X_train, y_train)
+
+# 5. 예측 및 평가
+y_pred = model.predict(X_test)
+y_pred_proba = model.predict_proba(X_test)[:, 1]
 
+accuracy = accuracy_score(y_test, y_pred)
+auc = roc_auc_score(y_test, y_pred_proba)
 
+# 6. 결과 출력
+print("=== 모델 평가 결과 ===")
+print(f"정확도 (Accuracy) : {accuracy:.4f}")
+print(f"ROC AUC Score     : {auc:.4f}")
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+endsubmit;
+run;
 
 
 
