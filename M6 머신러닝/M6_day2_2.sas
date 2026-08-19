@@ -86,15 +86,24 @@ print("널값 인덱스 목록:", null_indices)
 
 endsubmit;
 quit;
+
 proc python;
 submit;
 import pandas as pd
 
 df=pd.read_csv('/home/student/shop_csv/users_dirty.csv')
 
+#이상치 제거 >> q1, q3, iqr >> lo, hi
 
+q1,q3=df['total_spent'].quantile([0.25,0.75])
+iqr=q3-q1
+lo,hi=q1-iqr*1.5, q3+iqr*1.5
+df=df[ (df['total_spent'] >=lo) & (df['total_spent']<=hi)]
+print(f'이상치 처리후 : {df.shape}')
 endsubmit;
-quit;proc python;
+quit;
+
+proc python;
 submit;
 import pandas as pd
 
