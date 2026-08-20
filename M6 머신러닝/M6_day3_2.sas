@@ -100,3 +100,61 @@ quit;
 %let snippets=/home/student/snippets;
 %include '&snippets/macro/matplot.sas';
 %show_png(users_kmeans.png, title=K-Means 4그룹 군집화 결과);
+
+
+
+/* session 3: Elbow, Silhoutte >> 최적의 k값 검색 */
+%let csv_dir=/home/student/shop_csv;
+proc python;
+submit;
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score # 오타 수정 (silhoutte -> silhouette)
+
+# 그래프 설정
+import matplotlib.pyplot as plt
+from matplotlib import font_manager
+import os
+
+_font_path = '/home/student/font/malgun.ttf'
+font_manager.fontManager.addfont(_font_path)
+plt.rcParams['font.family'] = 'Malgun Gothic'
+plt.rcParams['axes.unicode_minus'] = False
+
+csv_path = SAS.symget('csv_dir')
+
+df = pd.read_csv(csv_path + '/users.csv').dropna()
+X_cols = ['age', 'total_spent', 'order_count', 'recency']
+X = df[X_cols]
+
+# 스케일링 (인스턴스 생성 () 추가)
+scaler = StandardScaler()
+X_s = scaler.fit_transform(X)
+
+# Silhouette 계산용 샘플링
+sample_size = min(5000, len(df))
+sample_idx = np.random.RandomState(42).choice(len(df), size=sample_size, replace=False)
+X_sample = X_s[sample_idx]
+
+# K 후보값 찾기 (k: 2 ~ 10)
+wcss, sil = [], []
+for k in range(2, 11):
+	# 1. Elbow (전체 데이터 기준)
+	km = KMeans(n_clusters=k, random_state=42, n_init=10)
+	labels = km.fit_predict(X_s)
+	wcss.append(km.inertia_) # WCSS(Inertia) 저장
+	
+	# 2. Silhouette (샘플링 데이터 기준)
+	km_s = KMeans(n_clusters=k, random_state=42, n_init=10)
+	sample_labels = km_s.fit_predict(X_sample) # fit_predict로 수정
+	sil_score = silhouette_score(X_sample, sample_labels)
+	sil.append(sil_score)
+
+	# 포맷팅 출력 수정
+	print(f'k={k:2d} | WCSS={km.inertia_:10.0f} | Silhouette={sil_score:.3f}')
+
+
+endsubmit;
+quit;
