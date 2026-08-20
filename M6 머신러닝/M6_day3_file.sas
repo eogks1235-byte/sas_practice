@@ -8,7 +8,7 @@ import pandas as pd
 csv_dir = SAS.symget('csv_dir')
 
 # 2. 데이터 불러오기 및 전처리
-users_path = csv_dir + '/users_dirty.csv'
+users_path = csv_dir + '/users_clean.csv'
 sales_path = csv_dir + '/sales.csv' # (예시) sales 파일 경로
 
 users = pd.read_csv(users_path)
