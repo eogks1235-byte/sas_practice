@@ -4,6 +4,11 @@ libname shop_db '/home/student/shop_db';
 %let csv_dir=/home/student/shop_csv;
 %include "&snippets./macro/matplot.sas";
 
+/* %let snippets=/home/student/snippets; */
+/* %include "&snippets/macro/matplot.sas"; */
+/*  */
+/* %show_png(diagnostics.png); */
+
 /*  users >> users_ml 로 복사 후 이진 분류 시작 */
 /*  */
 /* data shop_db.users_ml; */
