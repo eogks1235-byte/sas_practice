@@ -216,6 +216,85 @@ grid = GridSearchCV(SVC(kernel='rbf', probability=True, random_state=42),
 print(f'최적 : {grid.best_params_} · CV AUC = {grid.best_score_:.3f}')
    ENDSUBMIT;
 QUIT;
+
+PROC PYTHON;
+   SUBMIT;
+import pandas as pd
+import warnings
+warnings.filterwarnings('ignore')
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.metrics         import roc_auc_score
+
+csv_path = SAS.symget('CSV_PATH')
+df = pd.read_csv(csv_path+'/users.csv').dropna()
+X_cols = [c for c in ['age','total_spent','order_count','recency'] if c in df.columns]
+X = df[X_cols]
+y = df['churn']
+
+X_tr, X_te, y_tr, y_te = train_test_split(
+    X, y, test_size=0.3, stratify=y, random_state=42)
+
+try:
+    import optuna
+    import xgboost as xgb
+
+    optuna.logging.set_verbosity(optuna.logging.WARNING)   # 로그 최소화
+
+    # (1) 목적 함수 정의
+    def objective(trial):
+        params = {
+            'n_estimators'    : trial.suggest_int('n_estimators', 50, 500),
+            'max_depth'       : trial.suggest_int('max_depth', 3, 10),
+            'learning_rate'   : trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
+            'subsample'       : trial.suggest_float('subsample', 0.6, 1.0),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+            'random_state'    : 42,
+            'eval_metric'     : 'auc',
+            'use_label_encoder': False,
+        }
+        m = xgb.XGBClassifier(**params)
+        return cross_val_score(m, X_tr, y_tr, cv=3, scoring='roc_auc').mean()
+
+    # (2) 최적화 실행 (30 회 · 시연용 · 실무는 100~300)
+    study = optuna.create_study(direction='maximize',
+                                 sampler=optuna.samplers.TPESampler(seed=42))
+    study.optimize(objective, n_trials=30, show_progress_bar=False)
+
+    # (3) 결과
+    print(f'★ 최적 AUC (CV)    : {study.best_value:.4f}')
+    print(f'★ 최적 파라미터     : {study.best_params}')
+
+    # (4) 최적 모형 Test 평가
+    best = xgb.XGBClassifier(**study.best_params, random_state=42,
+                              eval_metric='auc', use_label_encoder=False)
+    best.fit(X_tr, y_tr)
+    prob = best.predict_proba(X_te)[:, 1]
+    print(f'★ Test AUC          : {roc_auc_score(y_te, prob):.4f}')
+
+    # (5) 상위 5 trial
+    print()
+    print('── Top 5 trials ──')
+    df_trials = study.trials_dataframe().sort_values('value', ascending=False).head(5)
+    print(df_trials[['number', 'value']].to_string(index=False))
+
+except ImportError as e:
+    print(f'⚠ 라이브러리 미설치 ({e.name}) : pip install optuna xgboost')
+# >>>
+# ★ 최적 AUC (CV)    : 0.7792
+# ★ 최적 파라미터     : {'n_estimators': 182, 'max_depth': 3, 'learning_rate': 0.0338365368731356, 'subsample': 
+# 0.6465355151101959, 'colsample_bytree': 0.9403349375437392}
+# ★ Test AUC          : 0.7664
+# ── Top 5 trials ──
+#  number    value
+#      22 0.779233
+#      14 0.779171
+#      19 0.779108
+#      16 0.779067
+#      27 0.778994
+   ENDSUBMIT;
+QUIT;
+
+
 /* session 6: Optuna 파라미터 자동 선택 (통합 코드) */
 
 proc python;
