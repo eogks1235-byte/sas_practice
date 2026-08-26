@@ -304,3 +304,227 @@ endsubmit;
 quit;
 
 
+%let userid=&SYSUSERID; /*student*/
+libname shop_db "/home/&userid/shop_db";
+%let csv_dir=/home/&SYSUSERID/shop_csv;
+%include "/home/&userid/snippets/macro/matplot.sas";
+
+
+/* session 4: xgb + optuna */
+proc python;
+submit;
+
+import gc
+import pandas as pd
+import numpy as np
+import pickle
+import warnings
+warnings.filterwarnings('ignore')
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.metrics         import (roc_auc_score, accuracy_score, precision_score,
+                                      recall_score, f1_score, confusion_matrix, roc_curve)
+csv_path = SAS.symget('CSV_PATH')
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib import font_manager
+import os
+_font_path = '/home/student/font/malgun.ttf'
+if os.path.exists(_font_path):
+    font_manager.fontManager.addfont(_font_path)
+    plt.rcParams['font.family'] = 'Malgun Gothic'
+plt.rcParams['axes.unicode_minus'] = False
+try:
+    df = pd.read_csv(f'{csv_path}/users_fe.csv')
+except FileNotFoundError:
+    df = pd.read_csv(csv_path+'/users.csv').dropna()
+drop_cols = [c for c in ['user_id', 'churn'] if c in df.columns]
+X = df.drop(columns=drop_cols).select_dtypes(include='number')
+y = df['churn']
+X_tr, X_te, y_tr, y_te = train_test_split(
+    X, y, test_size=0.3, stratify=y, random_state=42)
+del df
+gc.collect()
+try:
+    import optuna
+    import xgboost as xgb
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    def objective(trial):
+        params = {
+            'n_estimators'    : trial.suggest_int('n_estimators', 100, 500),
+            'max_depth'       : trial.suggest_int('max_depth', 3, 10),
+            'learning_rate'   : trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
+            'subsample'       : trial.suggest_float('subsample', 0.6, 1.0),
+            'random_state'    : 42,
+            'eval_metric'     : 'auc',
+            'use_label_encoder': False,
+            'n_jobs'          : 1,
+        }
+        score = cross_val_score(xgb.XGBClassifier(**params), X_tr, y_tr,
+                                 cv=3, scoring='roc_auc').mean()
+        gc.collect()
+        return score
+    study = optuna.create_study(direction='maximize',
+                                 sampler=optuna.samplers.TPESampler(seed=42))
+    study.optimize(objective, n_trials=30, show_progress_bar=False )
+    print(f'★ 최적 파라미터 : {study.best_params}')
+    print(f'★ CV AUC       : {study.best_value:.4f}')
+    final = xgb.XGBClassifier(**study.best_params, random_state=42,
+                               eval_metric='auc', use_label_encoder=False)
+    final.fit(X_tr, y_tr)
+    pred = final.predict(X_te)
+    prob = final.predict_proba(X_te)[:, 1]
+    print()
+    print('── S4 · 5 평가지표 (Test) ──')
+    print(f'  Accuracy  = {accuracy_score(y_te, pred):.3f}')
+    print(f'  Precision = {precision_score(y_te, pred):.3f}')
+    print(f'  Recall    = {recall_score(y_te, pred):.3f}  ★ 이탈 놓침 최소')
+    print(f'  F1        = {f1_score(y_te, pred):.3f}')
+    print(f'  AUC       = {roc_auc_score(y_te, prob):.3f}')
+    cm = confusion_matrix(y_te, pred)
+    print()
+    print('── Confusion Matrix ──')
+    print(f'              예측 잔류    예측 이탈')
+    print(f'  실제 잔류 : {cm[0,0]:>8}     {cm[0,1]:>8}')
+    print(f'  실제 이탈 : {cm[1,0]:>8}     {cm[1,1]:>8}')
+    fpr, tpr, _ = roc_curve(y_te, prob)
+    plt.figure(figsize=(7, 6))
+    plt.plot(fpr, tpr, linewidth=2,
+             label=f'XGB+Optuna · AUC={roc_auc_score(y_te, prob):.3f}')
+    plt.plot([0, 1], [0, 1], '--', color='gray', label='Random')
+    plt.xlabel('FPR'); plt.ylabel('TPR = Recall')
+    plt.title('Capstone 최종 모형 · ROC Curve')
+    plt.legend(loc='lower right')
+    plt.tight_layout()
+    plt.savefig(f'{csv_path}/s4_roc.png', dpi=100)
+    plt.close()
+    with open(f'{csv_path}/s4_final_model.pkl', 'wb') as f:
+        pickle.dump({'model': final, 'X_tr': X_tr, 'X_te': X_te,
+                      'y_tr': y_tr, 'y_te': y_te,
+                      'cols': X.columns.tolist(),
+                      'best_params': study.best_params}, f)
+    print()
+    print('★ s4_final_model.pkl 저장 (S5 SHAP 재사용)')
+except ImportError:
+    print('⚠ optuna/xgboost 미설치 · 튜닝 스킵')
+
+# >>>
+# ★ 최적 파라미터 : {'n_estimators': 497, 'max_depth': 3, 'learning_rate': 0.013958212325617057, 'subsample': 
+# 0.631040847490091}
+# ★ CV AUC       : 0.7795
+# ── S4 · 5 평가지표 (Test) ──
+#   Accuracy  = 0.814
+#   Precision = 0.604
+#   Recall    = 0.206  ★ 이탈 놓침 최소
+#   F1        = 0.307
+#   AUC       = 0.766
+# ── Confusion Matrix ──
+#               예측 잔류    예측 이탈
+#   실제 잔류 :    11595          405
+#   실제 이탈 :     2382          618
+
+endsubmit;
+quit;
+
+%show_png(s4_roc.png, title=%STR(S4 · Capstone 최종 모형 ROC));
+
+
+%let userid=&SYSUSERID; /*student*/
+libname shop_db "/home/&userid/shop_db";
+%let csv_dir=/home/&SYSUSERID/shop_csv;
+%include "/home/&userid/snippets/macro/matplot.sas";
+
+
+/* session 5: XAI SHAP */
+proc python;
+submit;
+import pandas as pd
+import numpy as np
+import pickle
+import warnings
+warnings.filterwarnings('ignore')
+
+csv_path = SAS.symget('CSV_PATH')
+
+# ★ matplotlib 한글 폰트 설정 (인라인)
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib import font_manager
+import os
+_font_path = '/home/student/fonts/malgun.ttf'
+if os.path.exists(_font_path):
+    font_manager.fontManager.addfont(_font_path)
+    plt.rcParams['font.family'] = 'Malgun Gothic'
+plt.rcParams['axes.unicode_minus'] = False
+
+try:
+    import shap
+
+    # S4 모형 로드
+    with open(f'{csv_path}/s4_final_model.pkl', 'rb') as f:
+        s = pickle.load(f)
+
+    final = s['model']
+    X_te  = s['X_te']
+
+    # 성능 위해 500 샘플만
+    sample = X_te.sample(min(500, len(X_te)), random_state=42)
+
+    # (1) TreeExplainer (XGB 는 매우 빠름)
+    explainer = shap.TreeExplainer(final)
+    shap_values = explainer.shap_values(sample)
+
+    # (2) 글로벌 summary plot (dot)
+    plt.figure(figsize=(10, 6))
+    shap.summary_plot(shap_values, sample, show=False)
+    plt.tight_layout()
+    plt.savefig(f'{csv_path}/shap_summary.png', dpi=100, bbox_inches='tight')
+    plt.close()
+    print('★ shap_summary.png 저장')
+
+    # (3) 변수 중요도 bar
+    plt.figure(figsize=(8, 5))
+    shap.summary_plot(shap_values, sample, plot_type='bar', show=False)
+    plt.tight_layout()
+    plt.savefig(f'{csv_path}/shap_bar.png', dpi=100, bbox_inches='tight')
+    plt.close()
+    print('★ shap_bar.png 저장')
+
+    # (4) 의존성 plot (recency)
+    if 'recency' in sample.columns:
+        plt.figure(figsize=(8, 5))
+        shap.dependence_plot('recency', shap_values, sample, show=False)
+        plt.tight_layout()
+        plt.savefig(f'{csv_path}/shap_dep_recency.png', dpi=100, bbox_inches='tight')
+        plt.close()
+        print('★ shap_dep_recency.png 저장 (recency 의존성)')
+
+    # (5) 개별 회원 해석 (mean|shap| Top 5 텍스트)
+    print()
+    print('── 변수 중요도 순위 (mean|SHAP|) ──')
+    imp = np.abs(shap_values).mean(0)
+    for var, val in sorted(zip(sample.columns, imp),
+                             key=lambda x: -x[1])[:6]:
+        print(f'  {var:<20} {val:>8.4f}')
+
+except ImportError:
+    print('⚠ shap 미설치 : pip install shap · 스킵')
+except FileNotFoundError:
+    print('⚠ s4_final_model.pkl 없음 · S4 먼저 실행')
+# ── 변수 중요도 순위 (mean|SHAP|) ──
+#   order_count            0.6174
+#   recency                0.5771
+#   age                    0.2689
+#   total_spent            0.0649
+#   avg_order              0.0222
+#   is_recent              0.0000
+# >>> 
+   ENDSUBMIT;
+QUIT;
+
+%show_png(shap_summary.png, title=%STR(S5 · SHAP 글로벌 summary));
+%show_png(shap_bar.png,     title=%STR(S5 · SHAP 변수 중요도 (mean|SHAP|)));
+
+
+
