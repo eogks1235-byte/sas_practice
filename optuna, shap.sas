@@ -1,38 +1,14 @@
-%let userid = &SYSUSERID;
-%include "/home/&userid/snippets/macro/matplot.sas";
-
-/* =========================================================
-   1단계: Optuna 및 SHAP 라이브러리 설치 (최초 1회 실행)
-   * 이미 설치되어 있다면 이 블록은 주석 처리하시거나 
-     설치가 안 되었을 때만 실행하셔도 됩니다.
-   ========================================================= */
 PROC PYTHON;
     SUBMIT;
 import sys
-import subprocess
+import site
 
-# 설치할 패키지 리스트
-packages = ['optuna', 'shap']
+# 사용자 패키지 설치 경로를 sys.path에 추가 (필수)
+user_site = site.getusersitepackages()
+if user_site not in sys.path:
+    sys.path.append(user_site)
 
-for pkg in packages:
-    try:
-        __import__(pkg)
-        print(f"✔ [{pkg}] 이미 설치되어 있습니다.")
-    except ImportError:
-        print(f"⚙ [{pkg}] 설치를 진행합니다...")
-        # 현재 SAS 파이썬 환경의 pip를 사용하여 패키지 설치
-        subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
-        print(f"✔ [{pkg}] 설치 완료!")
-    ENDSUBMIT;
-QUIT;
-
-
-/* =========================================================
-   2단계: 설치 버전 확인 및 간단 작동 테스트
-   ========================================================= */
-PROC PYTHON;
-    SUBMIT;
-import sys
+# 패키지 임포트
 import optuna
 import shap
 import pandas as pd
@@ -65,14 +41,12 @@ def objective(trial):
     model.fit(X_tr, y_tr)
     return model.score(X_te, y_te)
 
-# Optuna 출력이 너무 길어지지 않도록 로그 레벨 설정 (WARNING 이상만 출력)
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 study = optuna.create_study(direction='maximize')
 study.optimize(objective, n_trials=5)
 
-print(f"  ✔ Optuna 최적화 완료! (Best Accuracy: {study.best_value:.4f})")
-
+print(f"   ✔ Optuna 최적화 완료! (Best Accuracy: {study.best_value:.4f})")
 
 # ---------------------------------------------------------
 # [테스트 2] SHAP 값 계산 및 시각화 테스트
@@ -81,16 +55,14 @@ print("▶ [SHAP] 변수 중요도(SHAP) 계산 테스트 중...")
 best_model = XGBClassifier(**study.best_params, random_state=42)
 best_model.fit(X_tr, y_tr)
 
-# SHAP Explainer 생성 및 값 계산
 explainer = shap.TreeExplainer(best_model)
 shap_values = explainer(pd.DataFrame(X_te, columns=data.feature_names))
 
-print("  ✔ SHAP 값 계산 완료!")
-print(f"  ✔ SHAP Matrix Shape: {shap_values.values.shape}")
+print("   ✔ SHAP 값 계산 완료!")
+print(f"   ✔ SHAP Matrix Shape: {shap_values.values.shape}")
 print("\n🎉 Optuna와 SHAP 모두 SAS PROC PYTHON 환경에서 정상 작동합니다!")
-
-#  Python 버전 : 3.11.5
-#  Optuna 버전 : 4.9.0
-#  SHAP 버전   : 0.51.0
-    ENDSUBMIT;
+# Python 버전 : 3.11.5
+# Optuna 버전 : 4.9.0
+# SHAP 버전   : 0.51.0 
+   ENDSUBMIT;
 QUIT;
